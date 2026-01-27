@@ -159,12 +159,14 @@ def upload_documents():
     documents = []
     count = 1
     for row in raw_data[1:]:  # skip header row
-        artist_text = f"{row['name']}: {row['main_genre']} artist with {row['followers']} followers and popularity {row['popularity']}. Genres: {row['genres']}"
+        artist_text = (f"{row['name']}: "
+                       f"{row['main_genre']} artist with {row['followers']} followers and popularity {row['popularity']}. "
+                       f"Genres: {row['genres']}")
 
         # Generate embedding using your LangChain setup
         artist_embedding = embeddings.embed_query(
             artist_text
-        )  # Use embed_query for single text
+        )
 
         doc = {
             "id": row["id"],
