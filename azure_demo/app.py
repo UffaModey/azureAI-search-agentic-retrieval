@@ -1,9 +1,9 @@
 import streamlit as st
 
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from azure.identity import DefaultAzureCredential
 from azure.search.documents.knowledgebases import KnowledgeBaseRetrievalClient
 
-from agentic_retrieval import (  # rename if your file is named differently
+from azure_demo.agentic_retrieval import (  # rename if your file is named differently
     search_endpoint,
     knowledge_base_name,
     knowledge_source_name,

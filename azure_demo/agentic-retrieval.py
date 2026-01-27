@@ -38,8 +38,8 @@ import os
 load_dotenv()
 
 # Define variables
-search_endpoint = os.getenv('SEARCH_ENDPOINT')
-aoai_endpoint = os.getenv('AOAI_ENDPOINT')
+search_endpoint = os.getenv("SEARCH_ENDPOINT")
+aoai_endpoint = os.getenv("AOAI_ENDPOINT")
 aoai_embedding_model = "text-embedding-3-large"
 aoai_embedding_deployment = "text-embedding-3-large"
 aoai_gpt_model = "gpt-5-mini"
@@ -128,12 +128,10 @@ index = SearchIndex(
 index_client = SearchIndexClient(endpoint=search_endpoint, credential=credential)
 index_client.create_or_update_index(index)
 print(f"Index '{index_name}' created or updated successfully.")
-
+#
 # Upload documents
 url = "https://raw.githubusercontent.com/Azure-Samples/azure-search-sample-data/refs/heads/main/nasa-e-book/earth-at-night-json/documents.json"
 documents = requests.get(url).json()
-print(f"Found {len(documents)} documents.")
-print(documents[0])
 
 with SearchIndexingBufferedSender(
     endpoint=search_endpoint, index_name=index_name, credential=credential
@@ -177,67 +175,6 @@ knowledge_base = KnowledgeBase(
 index_client = SearchIndexClient(endpoint=search_endpoint, credential=credential)
 index_client.create_or_update_knowledge_base(knowledge_base)
 print(f"Knowledge base '{knowledge_base_name}' created or updated successfully.")
-
-# --- Reuseable retrieval helper for frontend ---
-
-
-def ask_knowledge_base(
-    agent_client, knowledge_source_name, user_question, chat_history
-):
-    """
-    agent_client: KnowledgeBaseRetrievalClient already initialized
-    knowledge_source_name: name of the search index knowledge source
-    user_question: latest user message (string)
-    chat_history: list of {"role": "...", "content": "..."} messages
-    returns: (answer_text, new_messages_list)
-    """
-    # system instructions
-    instructions = """
-    A Q&A agent that can answer questions about the Earth at night.
-    If you don't have the answer, respond with "I don't know".
-    """
-
-    # rebuild messages from chat_history + new user question
-    messages = [{"role": "system", "content": instructions}]
-    messages.extend(chat_history)
-    messages.append({"role": "user", "content": user_question})
-
-    req = KnowledgeBaseRetrievalRequest(
-        messages=[
-            KnowledgeBaseMessage(
-                role=m["role"],
-                content=[KnowledgeBaseMessageTextContent(text=m["content"])],
-            )
-            for m in messages
-            if m["role"] != "system"
-        ],
-        knowledge_source_params=[
-            SearchIndexKnowledgeSourceParams(
-                knowledge_source_name=knowledge_source_name,
-                include_references=True,
-                include_reference_source_data=True,
-                always_query_source=True,
-            )
-        ],
-        include_activity=True,
-        retrieval_reasoning_effort=KnowledgeRetrievalLowReasoningEffort,
-    )
-
-    result = agent_client.retrieve(retrieval_request=req)
-
-    response_parts = []
-    for resp in result.response:
-        for content in resp.content:
-            response_parts.append(content.text)
-    answer = "\n\n".join(response_parts) if response_parts else "No response found."
-
-    # extend chat history for the caller
-    new_history = chat_history + [
-        {"role": "user", "content": user_question},
-        {"role": "assistant", "content": answer},
-    ]
-    return answer, new_history
-
 
 # Set up messages
 instructions = """
@@ -376,16 +313,15 @@ else:
 references_contents.append(references_content)
 print("references_content:\n", references_content)
 
-if __name__ == "__main__":
-    # Clean up resources
-    index_client = SearchIndexClient(endpoint=search_endpoint, credential=credential)
-    index_client.delete_knowledge_base(knowledge_base_name)
-    print(f"Knowledge base '{knowledge_base_name}' deleted successfully.")
+# Clean up resources
+index_client = SearchIndexClient(endpoint=search_endpoint, credential=credential)
+index_client.delete_knowledge_base(knowledge_base_name)
+print(f"Knowledge base '{knowledge_base_name}' deleted successfully.")
 
-    index_client = SearchIndexClient(endpoint=search_endpoint, credential=credential)
-    index_client.delete_knowledge_source(knowledge_source=knowledge_source_name)
-    print(f"Knowledge source '{knowledge_source_name}' deleted successfully.")
+index_client = SearchIndexClient(endpoint=search_endpoint, credential=credential)
+index_client.delete_knowledge_source(knowledge_source=knowledge_source_name)
+print(f"Knowledge source '{knowledge_source_name}' deleted successfully.")
 
-    index_client = SearchIndexClient(endpoint=search_endpoint, credential=credential)
-    index_client.delete_index(index_name)
-    print(f"Index '{index_name}' deleted successfully.")
+index_client = SearchIndexClient(endpoint=search_endpoint, credential=credential)
+index_client.delete_index(index_name)
+print(f"Index '{index_name}' deleted successfully.")
