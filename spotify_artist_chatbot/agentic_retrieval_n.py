@@ -32,11 +32,26 @@ from azure.search.documents.knowledgebases.models import (
 import json
 from dotenv import load_dotenv
 import os
+import getpass
+from scipy.spatial.distance import pdist, squareform
+import numpy as np
+import pandas as pd
+from langchain_openai import OpenAIEmbeddings
+
+
 
 # --- Load environment variables ---
 load_dotenv()
 
 # Define variables
+if not os.getenv("OPENAI_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = getpass.getpass("Enter your OpenAI API key: ")
+
+os.environ["LANGSMITH_TRACING"] = "true"
+
+if not os.getenv("LANGSMITH_API_KEY"):
+    os.environ["LANGSMITH_API_KEY"] = getpass.getpass("Enter your LangSmith API key: ")
+
 search_endpoint = os.getenv('SEARCH_ENDPOINT')
 aoai_endpoint = os.getenv('AOAI_ENDPOINT')
 aoai_embedding_model = "text-embedding-3-large"
@@ -56,6 +71,9 @@ If you don't have the answer, respond with "I don't know".
 
 # Initialize credentials and clients once
 credential = DefaultAzureCredential()
+embeddings = OpenAIEmbeddings(
+    model="text-embedding-3-large"
+)
 token_provider = get_bearer_token_provider(
     credential, "https://search.azure.com/.default"
 )
@@ -79,40 +97,6 @@ def create_search_index():
                 facetable=True,
             ),
             SearchField(
-                name="name",
-                type="Edm.String",
-                filterable=True,
-                sortable=True,
-                facetable=True,
-            ),
-            SearchField(
-                name="followers",
-                type="Edm.Int64",
-                filterable=True,
-                sortable=True,
-                facetable=True,
-            ),
-            SearchField(
-                name="popularity",
-                type="Edm.Int32",
-                filterable=True,
-                sortable=True,
-                facetable=True,
-            ),
-            SearchField(
-                name="genres",
-                type="Collection(Edm.String)",
-                filterable=True,
-                facetable=True,
-            ),
-            SearchField(
-                name="main_genre",
-                type="Edm.String",
-                filterable=True,
-                sortable=True,
-                facetable=True,
-            ),
-            SearchField(
                 name="artist_text",
                 type="Edm.String",
                 filterable=False,
@@ -125,6 +109,13 @@ def create_search_index():
                 stored=False,
                 vector_search_dimensions=3072,
                 vector_search_profile_name="hnsw_text_3_large",
+            ),
+            SearchField(
+                name="artist_number",
+                type="Edm.Int32",
+                filterable=True,
+                sortable=True,
+                facetable=True,
             ),
         ],
         vector_search=VectorSearch(
@@ -154,9 +145,7 @@ def create_search_index():
                     name="semantic_config",
                     prioritized_fields=SemanticPrioritizedFields(
                         content_fields=[
-                            SemanticField(field_name="artist_text"),
-                            SemanticField(field_name="name"),
-                            SemanticField(field_name="genres"),
+                            SemanticField(field_name="artist_text")
                         ]
                     ),
                 )
@@ -174,20 +163,22 @@ def upload_documents():
         raw_data = json.load(f)
 
     documents = []
+    count = 1
     for row in raw_data[1:]:  # skip header row
+        artist_text = f"{row['name']}: {row['main_genre']} artist with {row['followers']} followers and popularity {row['popularity']}. Genres: {row['genres']}"
+
+        # Generate embedding using your LangChain setup
+        artist_embedding = embeddings.embed_query(artist_text)  # Use embed_query for single text
+
         doc = {
             "id": row["id"],
-            "name": row["name"],
-            "followers": int(row["followers"]) if row["followers"].isdigit() else 0,
-            "popularity": int(row["popularity"]) if row["popularity"].isdigit() else 0,
-            "main_genre": row["main_genre"],
-            "artist_text": f"{row['name']}: {row['main_genre']} artist with {row['followers']} followers and popularity {row['popularity']}. Genres: {row['genres']}",
+            "artist_text": artist_text,
+            "artist_embedding_text_3_large": artist_embedding, # List of 3072 floats
+            "artist_number": count,
         }
 
-        # Parse genres string to list
-        genres_str = row["genres"].strip("[]").replace("'", "").replace('"', "")
-        doc["genres"] = [g.strip() for g in genres_str.split(",")] if genres_str else []
         documents.append(doc)
+        count += 1
 
     with SearchIndexingBufferedSender(
         endpoint=search_endpoint, index_name=index_name, credential=credential
@@ -208,7 +199,7 @@ def create_knowledge_source():
             search_index_name=index_name,
             source_data_fields=[
                 SearchIndexFieldReference(name="id"),
-                SearchIndexFieldReference(name="name"),
+                SearchIndexFieldReference(name="artist_number"),
             ],
         ),
     )

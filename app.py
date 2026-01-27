@@ -7,19 +7,11 @@ from agentic_retrieval import (  # rename if your file is named differently
     search_endpoint,
     knowledge_base_name,
     knowledge_source_name,
-    KnowledgeRetrievalLowReasoningEffort,
-    KnowledgeBaseRetrievalRequest,
-    KnowledgeBaseMessage,
-    KnowledgeBaseMessageTextContent,
-    SearchIndexKnowledgeSourceParams,
+    ask_knowledge_base,
 )
 
-# Reuse ask_knowledge_base if you exported it; otherwise inline same logic here
-from agentic_retrieval import ask_knowledge_base
 
 # --- Initialize clients once per session ---
-
-
 @st.cache_resource
 def get_agent_client():
     credential = DefaultAzureCredential()

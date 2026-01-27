@@ -3,15 +3,10 @@ import streamlit as st
 from azure.identity import DefaultAzureCredential
 from azure.search.documents.knowledgebases import KnowledgeBaseRetrievalClient
 
-from agentic_retrieval_n import (
+from agentic_retrieval import (
     search_endpoint,
     knowledge_base_name,
     knowledge_source_name,
-    KnowledgeRetrievalLowReasoningEffort,
-    KnowledgeBaseRetrievalRequest,
-    KnowledgeBaseMessage,
-    KnowledgeBaseMessageTextContent,
-    SearchIndexKnowledgeSourceParams,
     ask_knowledge_base,
 )
 

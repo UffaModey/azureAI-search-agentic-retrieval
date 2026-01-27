@@ -29,14 +29,28 @@ from azure.search.documents.knowledgebases.models import (
     KnowledgeBaseMessageTextContent,
     SearchIndexKnowledgeSourceParams,
 )
+import requests
 import json
 from dotenv import load_dotenv
 import os
+
+import getpass
+from scipy.spatial.distance import pdist, squareform
+from langchain_openai import OpenAIEmbeddings
+
 
 # --- Load environment variables ---
 load_dotenv()
 
 # Define variables
+if not os.getenv("OPENAI_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = getpass.getpass("Enter your OpenAI API key: ")
+
+os.environ["LANGSMITH_TRACING"] = "true"
+
+if not os.getenv("LANGSMITH_API_KEY"):
+    os.environ["LANGSMITH_API_KEY"] = getpass.getpass("Enter your LangSmith API key: ")
+
 search_endpoint = os.getenv('SEARCH_ENDPOINT')
 aoai_endpoint = os.getenv('AOAI_ENDPOINT')
 aoai_embedding_model = "text-embedding-3-large"
@@ -51,6 +65,9 @@ search_api_version = "2025-11-01-preview"
 credential = DefaultAzureCredential()
 token_provider = get_bearer_token_provider(
     credential, "https://search.azure.com/.default"
+)
+embeddings = OpenAIEmbeddings(
+    model="text-embedding-3-large"
 )
 
 # Create an index
@@ -70,40 +87,6 @@ index = SearchIndex(
             facetable=True,
         ),
         SearchField(
-            name="name",
-            type="Edm.String",
-            filterable=True,
-            sortable=True,
-            facetable=True,
-        ),
-        SearchField(
-            name="followers",
-            type="Edm.Int64",
-            filterable=True,
-            sortable=True,
-            facetable=True,
-        ),
-        SearchField(
-            name="popularity",
-            type="Edm.Int32",
-            filterable=True,
-            sortable=True,
-            facetable=True,
-        ),
-        SearchField(
-            name="genres",
-            type="Collection(Edm.String)",
-            filterable=True,
-            facetable=True,
-        ),
-        SearchField(
-            name="main_genre",
-            type="Edm.String",
-            filterable=True,
-            sortable=True,
-            facetable=True,
-        ),
-        SearchField(
             name="artist_text",
             type="Edm.String",
             filterable=False,
@@ -116,6 +99,13 @@ index = SearchIndex(
             stored=False,
             vector_search_dimensions=3072,
             vector_search_profile_name="hnsw_text_3_large",
+        ),
+        SearchField(
+            name="artist_number",
+            type="Edm.Int32",
+            filterable=True,
+            sortable=True,
+            facetable=True,
         ),
     ],
     vector_search=VectorSearch(
@@ -144,11 +134,7 @@ index = SearchIndex(
             SemanticConfiguration(
                 name="semantic_config",
                 prioritized_fields=SemanticPrioritizedFields(
-                    content_fields=[
-                        SemanticField(field_name="artist_text"),
-                        SemanticField(field_name="name"),
-                        SemanticField(field_name="genres"),
-                    ]
+                    content_fields=[SemanticField(field_name="artist_text")]
                 ),
             )
         ],
@@ -159,28 +145,29 @@ index_client = SearchIndexClient(endpoint=search_endpoint, credential=credential
 index_client.create_or_update_index(index)
 print(f"Index '{index_name}' created or updated successfully.")
 
-# Upload documents - Load local artists.json
-with open("artists.json", "r", encoding="utf-8") as f:
+# Upload documents
+with open("test_artists.json", "r", encoding="utf-8") as f:
     raw_data = json.load(f)
 
-# Clean data: skip header row, parse genres, create searchable text
 documents = []
-for row in raw_data[1:]:  # skip first row {"id": "id", ...}
+count = 1
+for row in raw_data[1:]:  # skip header row
+    artist_text = f"{row['name']}: {row['main_genre']} artist with {row['followers']} followers and popularity {row['popularity']}. Genres: {row['genres']}"
+
+    # Generate embedding using your LangChain setup
+    artist_embedding = embeddings.embed_query(artist_text)  # Use embed_query for single text
+
     doc = {
         "id": row["id"],
-        "name": row["name"],
-        "followers": int(row["followers"]) if row["followers"].isdigit() else 0,
-        "popularity": int(row["popularity"]) if row["popularity"].isdigit() else 0,
-        "main_genre": row["main_genre"],
-        "artist_text": f"{row['name']}: {row['main_genre']} artist with {row['followers']} followers and popularity {row['popularity']}. Genres: {row['genres']}",
+        "artist_text": artist_text,
+        "artist_embedding_text_3_large": artist_embedding,  # List of 3072 floats
+        "artist_number": count,
     }
-    # Parse genres string to list
-    genres_str = row["genres"].strip("[]").replace("'", "").replace('"', "")
-    if genres_str:
-        doc["genres"] = [g.strip() for g in genres_str.split(",")]
-    else:
-        doc["genres"] = []
+
     documents.append(doc)
+    count += 1
+print(f"Found {len(documents)} documents.")
+print(documents[0])
 
 with SearchIndexingBufferedSender(
     endpoint=search_endpoint, index_name=index_name, credential=credential
@@ -188,8 +175,8 @@ with SearchIndexingBufferedSender(
     client.upload_documents(documents=documents)
 
 print(
-    f"Documents uploaded to index '{index_name}' successfully. Processed {len(documents)} artists."
-)
+        f"Documents uploaded to index '{index_name}' successfully. Processed {len(documents)} artists."
+    )
 
 # Create a knowledge source
 ks = SearchIndexKnowledgeSource(
@@ -199,7 +186,7 @@ ks = SearchIndexKnowledgeSource(
         search_index_name=index_name,
         source_data_fields=[
             SearchIndexFieldReference(name="id"),
-            SearchIndexFieldReference(name="name"),
+            SearchIndexFieldReference(name="artist_number"),
         ],
     ),
 )
@@ -227,8 +214,9 @@ index_client = SearchIndexClient(endpoint=search_endpoint, credential=credential
 index_client.create_or_update_knowledge_base(knowledge_base)
 print(f"Knowledge base '{knowledge_base_name}' created or updated successfully.")
 
-
 # --- Reuseable retrieval helper for frontend ---
+
+
 def ask_knowledge_base(
     agent_client, knowledge_source_name, user_question, chat_history
 ):
@@ -240,9 +228,8 @@ def ask_knowledge_base(
     returns: (answer_text, new_messages_list)
     """
     # system instructions
-    instructions = """
-    A Q&A agent that can answer questions about Spotify artists including their followers, popularity, genres, and main genre.
-    If you don't have the answer, respond with "I don't know".
+    instructions = """A Q&A agent that can answer questions about Spotify artists including their followers, popularity, genres, and main genre.
+If you don't have the answer, respond with "I don't know".
     """
 
     # rebuild messages from chat_history + new user question
@@ -289,7 +276,7 @@ def ask_knowledge_base(
 
 # Set up messages
 instructions = """
-A Q&A agent that can answer questions about Spotify artists.
+A Q&A agent that can answer questions about Spotify artists including their followers, popularity, genres, and main genre.
 If you don't have the answer, respond with "I don't know".
 """
 
@@ -302,9 +289,8 @@ agent_client = KnowledgeBaseRetrievalClient(
     credential=credential,
 )
 query_1 = """
-Who are the most popular electronic artists? 
-Which artists have the most followers in hip-hop?
-"""
+    Who are the most popular electronic artists? 
+    Which artists have the most followers in hip-hop?"""
 
 messages.append({"role": "user", "content": query_1})
 
